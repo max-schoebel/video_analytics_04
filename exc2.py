@@ -1,5 +1,8 @@
+
 import numpy as np 
 import os
+
+from exc1 import PathHMM, viterbi, get_observation_probabilities
 
 import ipdb
 
@@ -36,32 +39,55 @@ class HMM():
             if i == 0:
                 states_till_transition = change_index + 1
             elif i == len(change_indexes) - 2:
-                state_without_transition = 
+                state_without_transition = 2
             else:
                 states_till_transition = change_index - change_indexes[i-1]
-            self.transition_probabilities[i,i] = 
-            self.transition_probabilities[i+i,i] = 
+            self.transition_probabilities[i,i] = 2
+            self.transition_probabilities[i+i,i] = 2
         ipdb.set_trace()
 
 
 
 if __name__ == "__main__":
+    NUM_EPOCHS = 5
+
     with open('./exc1/hmm_definition.dict', 'r') as file:
         all_hmm_strings = file.read().splitlines()
-    
-    with open('./exc1/hmm_state_definition.vector', 'r') as file:
-        all_possible_states_strings = file.read().splitlines()
-    
-    training_files = os.listdir('./exc2')
+
+    means = np.loadtxt('./exc1/GMM_mean.matrix')
+    variances = np.loadtxt('./exc1/GMM_var.matrix')
 
     for hmm_string in all_hmm_strings:
-        hmm_training_files = [f for f in training_files if (hmm_string in f and not 'initStates' in f)]
+        hmm = PathHMM(hmm_string)
+        all_training_files = [f for f in os.listdir('./exc2') if hmm_string in f]
 
-        for training_file in hmm_training_files:
-            init_file = training_file.split('.')[0] + '_initStates.npy'
-            init_states = np.load('./exc2/' + init_file)
-            hmm = HMM(hmm_string, init_states)
+        training_files = [f for f in all_training_files if 'initStates' not in f]
+        init_files = [f for f in all_training_files if 'initStates' in f]
 
-            framewise_featues = np.load('./exc2/' + training_file)
-            print(framewise_featues.shape)
+        initial_decodings = [np.load('./exc2/' + f).astype(np.int) for f in init_files]
 
+        # init hmm from init files or just manually uniformly
+        # initial_decodings = ... (init_files)
+        hmm.update_transition_probabilities(initial_decodings)
+
+        for i in range(1, NUM_EPOCHS + 1):
+            print('Starting to train {}, iteration: '.format(hmm_string, i))
+            decodings = []
+            for training_file in training_files:
+                frame_features = np.load('./exc2/' + training_file)
+                frame_features = frame_features.T
+                
+                observation_probabilities_path = './obsprobs/' + training_file.split('.')[0] + '_obsprobs.npy'
+                observation_probabilities = get_observation_probabilities(observation_probabilities_path,
+                                                                          frame_features,
+                                                                          hmm.all_possible_states_strings,
+                                                                          means,
+                                                                          variances)
+                most_likely_path = viterbi(frame_features, hmm, observation_probabilities)
+                decodings.append(most_likely_path)
+
+            hmm.update_transition_probabilities(decodings)
+            print(hmm.transition_probabilities, hmm.transition_probabilities.shape)
+            # compute diff in transition probabilities
+            # print diff in transition_probabilities
+        ipdb.set_trace()
