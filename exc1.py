@@ -9,19 +9,24 @@ class PathHMM():
     def __init__(self, hmm_strings,
                  states_per_hmm_path = './exc1/hmm_definition.vector',
                  all_possible_states_path = './exc1/hmm_state_definition.vector'):
+        assert(type(hmm_strings) == list)
         with open(states_per_hmm_path, 'r') as file:
             self.num_states_per_hmm = file.read().splitlines()
         with open(all_possible_states_path, 'r') as file:
             self.all_possible_states_strings = file.read().splitlines()
-        self.hmm_strings = hmm_strings
         self.num_all_possible_states = len(self.all_possible_states_strings)
-        self.priors = np.zeros(len(self.all_possible_states_strings))
-        self.priors[0] = 1  # First HMM deterministically starts in its first state
+        self.hmm_strings = hmm_strings
+
         self.state_strings = []
         for hmm_string in hmm_strings:
             for possible_state in self.all_possible_states_strings:
                 if hmm_string in possible_state:
                     self.state_strings.append(possible_state)
+
+        self.priors = np.zeros(len(self.all_possible_states_strings))
+        first_state_index = self.all_possible_states_strings.index(self.state_strings[0])
+        self.priors[first_state_index] = 1  # First HMM deterministically starts in its first state
+
         self.transition_probabilities_list = []
         self.transition_probabilities = np.zeros((self.num_all_possible_states, self.num_all_possible_states))
         self.__init_transition_probabilities()
@@ -39,19 +44,18 @@ class PathHMM():
         transitions = np.zeros((self.num_all_possible_states, self.num_all_possible_states))
         occurences = np.zeros(self.num_all_possible_states, dtype=np.int)
         for decoding in decodings:
-            decoding = decoding[0]
             for i, state in enumerate(decoding):
                 occurences[state] += 1
                 if i < len(decoding) - 1:
                     next_state = decoding[i + 1]
                 else:
-                    pass
                     #next_state = ??  # TODO: find out how to handle transitions after last state
                 transitions[next_state,state] += 1
         occurences[occurences == 0] = 1  # to circumvent div-by-zero. value shouldn't matter, watch out for end-state value!!!
         trans_probs = transitions / occurences[None,:]
-        self.transition_probabilities_list.append(trans_probs)
+        # self.transition_probabilities_list.append(trans_probs)
         self.transition_probabilities = trans_probs
+        self.terminal_state_transition = len(decodings) / occurences[occurences > 0][-1]
     
 
 def viterbi(observed_sequence, path_hmm, observation_probabilities):
@@ -101,8 +105,10 @@ def compute_observation_probabilities(frame_features, all_possible_states_string
             cov = np.zeros((input_dim, input_dim))
             for k in range(input_dim):
                 cov[k,k] = variances[j,k]
-            observation_probabilities[i,j] = -multivariate_normal.logpdf([frame_features[:,i]], means[j], cov=cov)
-            # ipdb.set_trace()
+            if not cov.any():
+                observation_probabilities[i, j] = 0
+            else:
+                observation_probabilities[i,j] = -multivariate_normal.logpdf([frame_features[:,i]], means[j], cov=cov)
     return observation_probabilities
 
 
@@ -138,7 +144,7 @@ if __name__ == "__main__":
 
     means = np.loadtxt('./exc1/GMM_mean.matrix')
     variances = np.loadtxt('./exc1/GMM_var.matrix')
-    # ipdb.set_trace()
+    ipdb.set_trace()
 
     for hmm_path in hmm_paths:
 
@@ -155,6 +161,7 @@ if __name__ == "__main__":
                                                                       path_hmm.all_possible_states_strings,
                                                                       means,
                                                                       variances)
+            ipdb.set_trace()
 
             max_sequence_indices, likeliest_path_probability = viterbi(frame_features, path_hmm, observation_probabilities)
 
