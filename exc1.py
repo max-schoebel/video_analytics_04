@@ -6,31 +6,42 @@ import ipdb
 
     
 class PathHMM():
-    def __init__(self, hmm_strings,
+    def __init__(self, hmm_strings_or_pathhmm_objects,
                  states_per_hmm_path = './exc1/hmm_definition.vector',
                  all_possible_states_path = './exc1/hmm_state_definition.vector'):
-        assert(type(hmm_strings) == list)
         with open(states_per_hmm_path, 'r') as file:
             self.num_states_per_hmm = file.read().splitlines()
         with open(all_possible_states_path, 'r') as file:
             self.all_possible_states_strings = file.read().splitlines()
         self.num_all_possible_states = len(self.all_possible_states_strings)
-        self.hmm_strings = hmm_strings
 
-        self.state_strings = []
-        for hmm_string in hmm_strings:
-            for possible_state in self.all_possible_states_strings:
-                if hmm_string in possible_state:
-                    self.state_strings.append(possible_state)
+        self.transition_probabilities = np.zeros((self.num_all_possible_states, self.num_all_possible_states))
+            
+        if type(hmm_strings_or_pathhmm_objects[0]) == str:
+            self.hmm_strings = hmm_strings_or_pathhmm_objects
+            self.state_strings = []
+            for hmm_string in self.hmm_strings:
+                for possible_state in self.all_possible_states_strings:
+                    if hmm_string in possible_state:
+                        self.state_strings.append(possible_state)
+            self.__init_transition_probabilities()
+
+        elif type(hmm_strings_or_pathhmm_objects[0]) == PathHMM:
+            self.hmm_strings = []
+            self.state_strings = []
+            for i, hmm in enumerate(hmm_strings_or_pathhmm_objects):
+                self.hmm_strings += hmm.hmm_strings
+                self.state_strings += hmm.state_strings
+                self.transition_probabilities += hmm.transition_probabilities
+                last_state_index = hmm.all_possible_states_strings.index(hmm.state_strings[-1])
+                if i < len(hmm_strings_or_pathhmm_objects) -1:
+                    next_state_index = hmm.all_possible_states_strings.index(hmm_strings_or_pathhmm_objects[i + 1].state_strings[0])
+                    self.transition_probabilities[next_state_index:last_state_index] = hmm.terminal_state_transition
 
         self.priors = np.zeros(len(self.all_possible_states_strings))
         first_state_index = self.all_possible_states_strings.index(self.state_strings[0])
         self.priors[first_state_index] = 1  # First HMM deterministically starts in its first state
 
-        self.transition_probabilities_list = []
-        self.transition_probabilities = np.zeros((self.num_all_possible_states, self.num_all_possible_states))
-        self.__init_transition_probabilities()
-    
     def __init_transition_probabilities(self):
         for state_index, state in enumerate(self.state_strings):
             global_state_index = self.all_possible_states_strings.index(state)
@@ -48,12 +59,9 @@ class PathHMM():
                 occurences[state] += 1
                 if i < len(decoding) - 1:
                     next_state = decoding[i + 1]
-                else:
-                    #next_state = ??  # TODO: find out how to handle transitions after last state
                 transitions[next_state,state] += 1
         occurences[occurences == 0] = 1  # to circumvent div-by-zero. value shouldn't matter, watch out for end-state value!!!
         trans_probs = transitions / occurences[None,:]
-        # self.transition_probabilities_list.append(trans_probs)
         self.transition_probabilities = trans_probs
         self.terminal_state_transition = len(decodings) / occurences[occurences > 0][-1]
     
@@ -64,12 +72,6 @@ def viterbi(observed_sequence, path_hmm, observation_probabilities):
 
     deltas = -np.log(path_hmm.priors) + observation_probabilities[0]
     argmins = []
-    # previous_most_likely_state_index = np.argmin(deltas)
-    # max_sequence.append(previous_most_likely_state_index)
-    # likeliest_path_probability = deltas[previous_most_likely_state_index]
-
-    # print(deltas, np.argmin(deltas))
-    # ipdb.set_trace()
 
     num_video_frames = observed_sequence.shape[1]
     for i in range(1, num_video_frames):
@@ -82,10 +84,6 @@ def viterbi(observed_sequence, path_hmm, observation_probabilities):
         # print(deltas, np.argmin(deltas))
         # ipdb.set_trace()
 
-        # previous_most_likely_state_index = np.argmin(deltas)
-        # likeliest_path_probability = deltas[previous_most_likely_state_index]
-        # max_sequence.append(previous_most_likely_state_index)
-    
     likeliest_last_state, likeliest_path_probability = np.argmin(deltas), np.min(deltas)
     max_sequence.append(likeliest_last_state)
     argmins.reverse()
@@ -136,22 +134,8 @@ def mean_over_frames(gt, max_sequence_states):
     return corrects / len(max_sequence_states)
 
 
-if __name__ == "__main__":
-    hmm_paths = ['./exc1/test1.grammar', './exc1/test2.grammar', './exc1/test3.grammar']
-    video_paths = ['./exc1/P03_cam01_P03_cereals.npy', './exc1/P03_cam01_P03_coffee.npy', './exc1/P03_cam01_P03_milk.npy']
-    gt_paths = ['./exc1/P03_cam01_P03_cereals.gt', './exc1/P03_cam01_P03_coffee.gt', './exc1/P03_cam01_P03_milk.gt']
-    observation_probabilities_paths = {video_paths[0]:'./obsprobs/obs_probs_cereals.npy', video_paths[1]: './obsprobs/obs_probs_coffee.npy', video_paths[2]: './obsprobs/obs_probs_milk.npy'}
-
-    means = np.loadtxt('./exc1/GMM_mean.matrix')
-    variances = np.loadtxt('./exc1/GMM_var.matrix')
-    ipdb.set_trace()
-
-    for hmm_path in hmm_paths:
-
-        with open(hmm_path, 'r') as file:
-            hmm_strings = file.read().splitlines()[0].split(' ')
-
-        path_hmm = PathHMM(hmm_strings)
+def evaluate_hmms(hmms, video_paths, gt_paths, observation_probabilities_paths, means, variances):
+    for path_hmm in hmms:
 
         for i, video_path in enumerate(video_paths):
 
@@ -161,8 +145,6 @@ if __name__ == "__main__":
                                                                       path_hmm.all_possible_states_strings,
                                                                       means,
                                                                       variances)
-            ipdb.set_trace()
-
             max_sequence_indices, likeliest_path_probability = viterbi(frame_features, path_hmm, observation_probabilities)
 
             gt_path = gt_paths[i]
@@ -179,3 +161,23 @@ if __name__ == "__main__":
             print('Probability:' ,likeliest_path_probability)
             print('Accuracy:', acc)
             print('---')
+
+
+if __name__ == "__main__":
+    hmm_paths = ['./exc1/test1.grammar', './exc1/test2.grammar', './exc1/test3.grammar']
+    video_paths = ['./exc1/P03_cam01_P03_cereals.npy', './exc1/P03_cam01_P03_coffee.npy', './exc1/P03_cam01_P03_milk.npy']
+    gt_paths = ['./exc1/P03_cam01_P03_cereals.gt', './exc1/P03_cam01_P03_coffee.gt', './exc1/P03_cam01_P03_milk.gt']
+    observation_probabilities_paths = {'./exc1/P03_cam01_P03_cereals.npy':'./obsprobs/obs_probs_cereals.npy',
+                                       './exc1/P03_cam01_P03_coffee.npy':'./obsprobs/obs_probs_coffee.npy',
+                                       './exc1/P03_cam01_P03_milk.npy':'./obsprobs/obs_probs_milk.npy'}
+    means = np.loadtxt('./exc1/GMM_mean.matrix')
+    variances = np.loadtxt('./exc1/GMM_var.matrix')
+
+    hmms = []
+    for hmm_path in hmm_paths:
+        with open(hmm_path, 'r') as file:
+            hmm_strings = file.read().splitlines()[0].split(' ')
+        path_hmm = PathHMM(hmm_strings)
+        hmms.append(path_hmm)
+    
+    evaluate_hmms(hmms, video_paths, gt_paths, observation_probabilities_paths, means, variances)
